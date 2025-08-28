@@ -1,0 +1,6 @@
+{
+  "ai_format": "openai",
+  "api_url": "https://openrouter.ai",
+  "api_key": "YOUR_API_KEY_HERE",
+  "model": "gpt-3.5-turbo"
+}
