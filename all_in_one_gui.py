@@ -24,6 +24,16 @@ from pathlib import Path
 import json
 import re
 
+# AI文本处理相关导入
+try:
+    import requests
+    from dataclasses import dataclass, asdict
+    from enum import Enum
+    from typing import Dict, List, Optional, Any
+    AI_PROCESSOR_AVAILABLE = True
+except ImportError:
+    AI_PROCESSOR_AVAILABLE = False
+
 # 尝试导入必要的库
 try:
     import sounddevice as sd
@@ -66,11 +76,11 @@ class AllInOneGUI:
             pass  # 如果图标不存在，忽略错误
         
         # 创建主框架
-        self.main_frame = ttk.Frame(root, padding="15")
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        self.inner_frame = ttk.Frame(root, padding="15")
+        self.inner_frame.pack(fill=tk.BOTH, expand=True)
         
         # 创建标题区域
-        title_frame = ttk.Frame(self.main_frame, style="TFrame")
+        title_frame = ttk.Frame(self.inner_frame, style="TFrame")
         title_frame.pack(fill=tk.X, pady=(0, 20))
         
         # 创建头部容器
@@ -90,46 +100,39 @@ class AllInOneGUI:
         separator.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         # 创建选项卡
-        self.tab_control = ttk.Notebook(self.main_frame)
+        self.tab_control = ttk.Notebook(self.inner_frame)
+        
+        # 语音转文字服务选项卡 (移到第一个)
+        self.voice_service_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.voice_service_tab, text="🎙️ 语音转文字服务")
         
         # 单文件转录选项卡
         self.single_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.single_tab, text="单文件转录")
+        self.tab_control.add(self.single_tab, text="📁 单文件转录")
         
         # 批量转录选项卡
         self.batch_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.batch_tab, text="批量转录")
-        
-        # 语音转文字服务选项卡
-        self.voice_service_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.voice_service_tab, text="语音转文字服务")
+        self.tab_control.add(self.batch_tab, text="📂 批量转录")
         
         # 智能音频清理选项卡
         self.audio_cleaner_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.audio_cleaner_tab, text="智能音频清理")
+        self.tab_control.add(self.audio_cleaner_tab, text="🧹 智能音频清理")
+        
+        # 日志选项卡 (移到最后)
+        self.log_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.log_tab, text="📋 操作日志")
         
         self.tab_control.pack(expand=True, fill=tk.BOTH)
         
-        # 设置日志区域
-        log_frame = ttk.LabelFrame(self.main_frame, text="📋 操作日志", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        # 默认选中语音转文字服务选项卡
+        self.tab_control.select(0)
         
-        # 创建日志文本框架
-        log_text_frame = ttk.Frame(log_frame)
-        log_text_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.log_text = tk.Text(log_text_frame, height=10, wrap=tk.WORD, 
-                               font=("Microsoft YaHei", 9), bg="#f8f9fa", fg="#343a40",
-                               relief="flat", borderwidth=1)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # 添加滚动条
-        scrollbar = ttk.Scrollbar(log_text_frame, command=self.log_text.yview, style="TScrollbar")
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.config(yscrollcommand=scrollbar.set)
+        # 创建临时日志文本组件（在选项卡设置期间使用）
+        self.temp_log_text = tk.Text(self.inner_frame, height=1, wrap=tk.WORD, state='disabled')
+        self.temp_log_text.pack_forget()  # 隐藏临时日志组件
         
         # 状态栏
-        status_frame = ttk.Frame(self.main_frame, style="TFrame")
+        status_frame = ttk.Frame(self.inner_frame, style="TFrame")
         status_frame.pack(fill=tk.X, pady=(10, 0))
         
         self.status_var = tk.StringVar(value="✅ 系统就绪")
@@ -150,11 +153,23 @@ class AllInOneGUI:
         self.voice_service_active = False
         self.keyboard_listener = None
         
+        # AI文本处理相关变量
+        # 语音转文字服务AI配置
+        self.voice_ai_config = self.load_voice_ai_config()
+        self.voice_ai_enabled = self.voice_ai_config.get("enabled", False)
+        self.voice_ai_session = None
+        
+        # 音频清理服务AI配置
+        self.audio_cleaner_ai_config = self.load_audio_cleaner_ai_config()
+        self.audio_cleaner_ai_enabled = self.audio_cleaner_ai_config.get("enabled", False)
+        self.audio_cleaner_ai_session = None
+        
         # 设置各选项卡
         self.setup_single_tab()
         self.setup_batch_tab()
         self.setup_voice_service_tab()
         self.setup_audio_cleaner_tab()
+        self.setup_log_tab()
         
         # 查找模型
         self.find_models()
@@ -232,6 +247,19 @@ class AllInOneGUI:
         # 设置单选按钮和复选框样式
         style.configure("TRadiobutton", font=("Microsoft YaHei", 10), background=secondary_color, foreground=dark_color)
         style.configure("TCheckbutton", font=("Microsoft YaHei", 10), background=secondary_color, foreground=dark_color)
+        
+        # 初始化AI处理器（在日志选项卡设置完成后）
+        if AI_PROCESSOR_AVAILABLE:
+            self.setup_voice_ai_processor()
+            self.setup_audio_cleaner_ai_processor()
+        
+        # 记录初始化完成日志
+        self.log("🎉 音频转录全功能工具启动完成")
+        self.log("📌 当前选项卡：语音转文字服务 (已设为默认)")
+        if self.voice_ai_enabled:
+            self.log("🤖 语音转文字AI文本处理功能已启用")
+        else:
+            self.log("⏸️ 语音转文字AI文本处理功能已禁用 (可在设置中启用)")
         
     def setup_single_tab(self):
         """
@@ -370,7 +398,23 @@ class AllInOneGUI:
         """
         设置语音转文字服务选项卡
         """
-        frame = ttk.Frame(self.voice_service_tab, padding="10")
+        # 创建主框架和滚动条
+        main_canvas = tk.Canvas(self.voice_service_tab)
+        scrollbar = ttk.Scrollbar(self.voice_service_tab, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = ttk.Frame(main_canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+        
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        frame = ttk.Frame(scrollable_frame, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
         
         # 标题
@@ -418,6 +462,21 @@ class AllInOneGUI:
                                          style="Primary.TButton")
         self.start_service_btn.pack(side=tk.LEFT, padx=5)
         
+        # 进度条区域
+        progress_frame = ttk.LabelFrame(frame, text="处理进度")
+        progress_frame.pack(fill=tk.X, pady=10, padx=5)
+        
+        # 进度条
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
+                                          maximum=100, length=400, mode='determinate')
+        self.progress_bar.pack(padx=10, pady=5)
+        
+        # 进度状态标签
+        self.progress_status_var = tk.StringVar(value="就绪")
+        progress_status_label = ttk.Label(progress_frame, textvariable=self.progress_status_var)
+        progress_status_label.pack(padx=10, pady=2)
+        
         # 转录结果显示区域
         result_frame = ttk.LabelFrame(frame, text="转录结果")
         result_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=5)
@@ -431,7 +490,7 @@ class AllInOneGUI:
         self.transcription_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # 添加滚动条
-        text_scrollbar = ttk.Scrollbar(self.transcription_text, command=self.transcription_text.yview)
+        text_scrollbar = ttk.Scrollbar(text_frame, command=self.transcription_text.yview)
         text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.transcription_text.config(yscrollcommand=text_scrollbar.set)
         
@@ -555,6 +614,17 @@ class AllInOneGUI:
         self.end_sound_var = tk.BooleanVar(value=True)
         end_sound_check = ttk.Checkbutton(sound_frame, text="结束录音提示音", variable=self.end_sound_var, command=self.update_sound_settings)
         end_sound_check.pack(side=tk.LEFT, padx=5)
+        
+        # AI文本处理设置
+        ai_frame = ttk.Frame(settings_frame)
+        ai_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.ai_enabled_var = tk.BooleanVar(value=self.voice_ai_enabled)
+        ai_check = ttk.Checkbutton(ai_frame, text="启用AI文本处理", variable=self.ai_enabled_var, command=self.toggle_voice_ai_processor)
+        ai_check.pack(side=tk.LEFT, padx=5)
+        
+        ai_settings_btn = ttk.Button(ai_frame, text="AI设置", command=self.show_voice_ai_settings_dialog)
+        ai_settings_btn.pack(side=tk.LEFT, padx=5)
         
         # 提示音频率设置
         freq_frame = ttk.Frame(settings_frame)
@@ -794,6 +864,9 @@ class AllInOneGUI:
         
         load_btn = ttk.Button(settings_btn_frame, text="加载设置", command=self.load_api_settings)
         load_btn.pack(side=tk.LEFT, padx=5)
+        
+        ai_settings_btn = ttk.Button(settings_btn_frame, text="AI设置", command=self.show_audio_cleaner_ai_settings_dialog)
+        ai_settings_btn.pack(side=tk.LEFT, padx=5)
         
         # 音频文件选择
         audio_frame = ttk.LabelFrame(frame, text="📁 音频文件 (步骤 1)")
@@ -1305,9 +1378,29 @@ class AllInOneGUI:
         参数:
             message: 日志消息
         """
-        self.log_text.insert(tk.END, f"{message}\n")
-        self.log_text.see(tk.END)  # 滚动到最新消息
-        self.root.update_idletasks()  # 更新UI
+        timestamp = time.strftime("%H:%M:%S")
+        
+        # 检查是否有正式的日志文本组件
+        if hasattr(self, 'log_text') and self.log_text.winfo_exists():
+            log_widget = self.log_text
+            # 更新日志统计
+            if hasattr(self, 'update_log_stats'):
+                self.update_log_stats()
+        else:
+            # 使用临时日志组件
+            if not hasattr(self, 'temp_log_text'):
+                return
+            log_widget = self.temp_log_text
+        
+        # 插入日志消息
+        try:
+            log_widget.config(state='normal')
+            log_widget.insert(tk.END, f"[{timestamp}] {message}\n")
+            log_widget.see(tk.END)  # 滚动到最新消息
+            log_widget.config(state='disabled')
+            self.root.update_idletasks()  # 更新UI
+        except:
+            pass  # 忽略日志错误
     
     def paste_api_url(self):
         """
@@ -1519,6 +1612,22 @@ class AllInOneGUI:
             self.status_indicator.config(text="🔴")
         else:
             self.status_indicator.config(text="🟢")
+    
+    def update_progress(self, value, status=""):
+        """
+        更新进度条和状态文本
+        
+        参数:
+            value: 进度值 (0-100)
+            status: 状态文本
+        """
+        if hasattr(self, 'progress_var'):
+            self.progress_var.set(value)
+        if hasattr(self, 'progress_status_var') and status:
+            self.progress_status_var.set(status)
+        
+        # 确保界面更新
+        self.root.update_idletasks()
     
     def clear_single_file(self):
         """
@@ -2038,10 +2147,15 @@ class AllInOneGUI:
             return
         
         try:
+            # 重置进度条
+            self.update_progress(0, "开始处理音频...")
+            
             # 将录音数据转换为numpy数组
+            self.update_progress(10, "转换音频数据...")
             audio_data = np.concatenate(self.recorded_frames, axis=0)
             
             # 保存为临时WAV文件
+            self.update_progress(20, "保存音频文件...")
             temp_file = os.path.join(self.temp_dir, "temp_recording.wav")
             # 确保音频数据格式正确（16位整数）
             audio_data_int16 = np.int16(audio_data * 32767)
@@ -2050,10 +2164,32 @@ class AllInOneGUI:
             self.log(f"音频已保存到临时文件: {temp_file}")
             
             # 转录音频
+            self.update_progress(40, "转录音频中...")
             text = self.transcribe_audio(temp_file)
+            self.update_progress(70, "转录完成")
+            
+            # AI后处理
+            if text and self.voice_ai_enabled:
+                self.update_progress(80, "语音转文字AI处理中...")
+                self.log("🤖 开始语音转文字AI文本处理...")
+                self.log(f"📝 原始转录文本: {text}")
+                processed_text = self.process_text_with_voice_ai(text)
+                if processed_text != text:
+                    self.log("✅ 语音转文字AI处理完成，文本已优化")
+                    self.log(f"🔤 优化后文本: {processed_text}")
+                    text = processed_text
+                else:
+                    self.log("⚪ 语音转文字AI处理完成，文本无变化")
+                    self.log(f"📄 保持原始文本: {text}")
+            else:
+                if text:
+                    if not self.voice_ai_enabled:
+                        self.log("⏸️ 语音转文字AI文本处理已禁用，直接使用原始转录文本")
+                    self.log(f"📄 转录结果: {text}")
             
             # 显示转录结果
             if text:
+                self.update_progress(100, "处理完成")
                 # 清空之前的文本并显示新的转录结果
                 self.transcription_text.delete("1.0", tk.END)
                 self.transcription_text.insert(tk.END, text)
@@ -3456,6 +3592,44 @@ class AllInOneGUI:
             ]
             if not self.cleaner_model_var.get() or "gpt" in self.cleaner_model_var.get():
                 self.cleaner_model_var.set("gemini-1.5-flash")
+    
+    def update_voice_ai_format_ui(self, ai_format, format_info_var, model_combo):
+        """更新语音转文字AI格式UI"""
+        if ai_format == "openai":
+            format_info_var.set("标准OpenAI兼容格式")
+            models = [
+                "gpt-3.5-turbo", 
+                "gpt-4", 
+                "gpt-4-turbo", 
+                "gpt-4o",
+                "claude-3-haiku", 
+                "claude-3-sonnet",
+                "claude-3-opus"
+            ]
+        elif ai_format == "ollama":
+            format_info_var.set("Ollama本地AI模型格式")
+            models = [
+                "llama3.1:8b",
+                "llama3.1:70b",
+                "llama3.2:3b",
+                "llama3:8b",
+                "llama3:70b",
+                "qwen2.5:7b",
+                "qwen2.5:32b",
+                "mistral:7b",
+                "mixtral:8x7b",
+                "phi3:14b"
+            ]
+        elif ai_format == "gemini":
+            format_info_var.set("Google Gemini API格式")
+            models = [
+                "gemini-1.5-flash",
+                "gemini-1.5-pro",
+                "gemini-1.0-pro"
+            ]
+        
+        # 更新模型列表
+        model_combo['values'] = models
         
         # 在实际使用中，控件会通过配置更新
         self.log(f"已更新{ai_format.upper()}格式的模型建议")
@@ -3470,12 +3644,14 @@ class AllInOneGUI:
             
         if ai_format == "openai":
             # OpenAI格式：自动添加/v1后缀
-            if not base_url.endswith('/v1'):
+            # 检查是否已经以/v1或/v1/结尾
+            if not (base_url.endswith('/v1') or base_url.endswith('/v1/')):
                 if base_url.endswith('/'):
                     return base_url + 'v1'
                 else:
                     return base_url + '/v1'
-            return base_url
+            # 如果已经包含/v1，直接返回（移除末尾斜杠避免重复）
+            return base_url.rstrip('/')
         elif ai_format == "ollama":
             # Ollama格式：确保有/api路径
             if not base_url.endswith('/api'):
@@ -3489,6 +3665,122 @@ class AllInOneGUI:
             return base_url
         
         return base_url
+    
+    def format_voice_ai_api_url(self, ai_format, base_url):
+        """
+        根据AI格式格式化语音AI的API URL
+        
+        参数:
+            ai_format: AI格式 ("openai", "ollama", "gemini")
+            base_url: 基础URL
+            
+        返回:
+            str: 格式化后的URL
+        """
+        if not base_url:
+            return None
+            
+        base_url = base_url.strip()
+        
+        if ai_format == "openai":
+            # OpenAI格式：自动添加/v1后缀
+            # 检查是否已经以/v1或/v1/结尾
+            if not (base_url.endswith('/v1') or base_url.endswith('/v1/')):
+                if base_url.endswith('/'):
+                    return base_url + 'v1'
+                else:
+                    return base_url + '/v1'
+            # 如果已经包含/v1，直接返回（移除末尾斜杠避免重复）
+            return base_url.rstrip('/')
+        elif ai_format == "ollama":
+            # Ollama格式：确保有/api路径
+            if not base_url.endswith('/api'):
+                if base_url.endswith('/'):
+                    return base_url + 'api'
+                else:
+                    return base_url + '/api'
+            return base_url
+        elif ai_format == "gemini":
+            # Gemini格式：直接使用用户输入的URL
+            return base_url
+        
+        return base_url
+    
+    def setup_log_tab(self):
+        """
+        设置日志选项卡
+        """
+        # 创建主框架
+        inner_frame = ttk.Frame(self.log_tab, padding="15")
+        inner_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 标题
+        title_label = ttk.Label(inner_frame, text="📋 操作日志", font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 10))
+        
+        # 日志文本框架
+        log_text_frame = ttk.Frame(inner_frame)
+        log_text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建日志文本区域
+        self.log_text = tk.Text(log_text_frame, wrap=tk.WORD, 
+                               font=("Microsoft YaHei", 9), bg="#f8f9fa", fg="#343a40",
+                               relief="flat", borderwidth=1)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(log_text_frame, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+        
+        # 按钮区域
+        button_frame = ttk.Frame(inner_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        clear_log_btn = ttk.Button(button_frame, text="清空日志", command=self.clear_log)
+        clear_log_btn.pack(side=tk.LEFT, padx=5)
+        
+        save_log_btn = ttk.Button(button_frame, text="保存日志", command=self.save_log)
+        save_log_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 日志统计
+        self.log_stats_var = tk.StringVar(value="日志条数: 0")
+        stats_label = ttk.Label(button_frame, textvariable=self.log_stats_var)
+        stats_label.pack(side=tk.RIGHT, padx=5)
+    
+    def clear_log(self):
+        """
+        清空日志
+        """
+        self.log_text.delete("1.0", tk.END)
+        self.log("日志已清空")
+        self.update_log_stats()
+    
+    def save_log(self):
+        """
+        保存日志到文件
+        """
+        try:
+            log_content = self.log_text.get("1.0", tk.END)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            log_file = f"voice_log_{timestamp}.txt"
+            
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.write(log_content)
+            
+            self.log(f"日志已保存到: {log_file}")
+            messagebox.showinfo("成功", f"日志已保存到: {log_file}")
+        except Exception as e:
+            self.log(f"保存日志失败: {e}")
+            messagebox.showerror("错误", f"保存日志失败: {e}")
+    
+    def update_log_stats(self):
+        """
+        更新日志统计
+        """
+        log_content = self.log_text.get("1.0", tk.END)
+        line_count = len([line for line in log_content.split('\n') if line.strip()])
+        self.log_stats_var.set(f"日志条数: {line_count}")
     
     def load_voice_service_config(self):
         """
@@ -3636,6 +3928,977 @@ class AllInOneGUI:
         except Exception as e:
             self.log(f"提示音测试失败: {e}")
             messagebox.showerror("错误", f"提示音测试失败: {e}")
+
+    # ==================== AI文本处理功能 ====================
+    
+    def load_voice_ai_config(self):
+        """
+        加载语音转文字AI处理配置
+        """
+        default_config = {
+            "enabled": False,
+            "api_key": "",
+            "api_base": "https://api.openai.com",
+            "model": "gpt-3.5-turbo",
+            "max_tokens": 1000,
+            "temperature": 0.1,
+            "auto_correct": True,
+            "grammar_check": True,
+            "semantic_optimization": True,
+            "voice_prompt": None,
+            "custom_prompt": None,
+            "ai_format": "openai"
+        }
+        
+        config_file = "voice_ai_config.json"
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # 合并默认配置
+                    for key, value in default_config.items():
+                        if key not in config:
+                            config[key] = value
+                return config
+            except Exception as e:
+                self.log(f"加载语音转文字AI配置失败: {e}")
+        
+        return default_config
+    
+    def load_audio_cleaner_ai_config(self):
+        """
+        加载音频清理AI处理配置
+        """
+        default_config = {
+            "enabled": False,
+            "api_key": "",
+            "api_base": "https://openrouter.ai/api/v1",
+            "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+            "max_tokens": 1000,
+            "temperature": 0.1,
+            "audio_cleanup_prompt": None,
+            "custom_prompt": None,
+            "max_segment_length": 50,
+            "gap_threshold": 1.0
+        }
+        
+        config_file = "audio_cleaner_ai_config.json"
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # 合并默认配置
+                    for key, value in default_config.items():
+                        if key not in config:
+                            config[key] = value
+                return config
+            except Exception as e:
+                self.log(f"加载音频清理AI配置失败: {e}")
+        
+        return default_config
+    
+    def save_voice_ai_config(self):
+        """
+        保存语音转文字AI配置
+        """
+        config_file = "voice_ai_config.json"
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.voice_ai_config, f, indent=2, ensure_ascii=False)
+            self.log("语音转文字AI配置已保存")
+        except Exception as e:
+            self.log(f"保存语音转文字AI配置失败: {e}")
+    
+    def save_audio_cleaner_ai_config(self):
+        """
+        保存音频清理AI配置
+        """
+        config_file = "audio_cleaner_ai_config.json"
+        try:
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.audio_cleaner_ai_config, f, indent=2, ensure_ascii=False)
+            self.log("音频清理AI配置已保存")
+        except Exception as e:
+            self.log(f"保存音频清理AI配置失败: {e}")
+    
+    def setup_voice_ai_processor(self):
+        """
+        设置语音转文字AI处理器
+        """
+        if not AI_PROCESSOR_AVAILABLE:
+            self.log("语音转文字AI处理功能不可用：缺少必要库")
+            return
+        
+        try:
+            self.voice_ai_session = requests.Session()
+            self.update_voice_ai_session_headers()
+            self.log("语音转文字AI处理器已初始化")
+        except Exception as e:
+            self.log(f"语音转文字AI处理器初始化失败: {e}")
+    
+    def setup_audio_cleaner_ai_processor(self):
+        """
+        设置音频清理AI处理器
+        """
+        if not AI_PROCESSOR_AVAILABLE:
+            self.log("音频清理AI处理功能不可用：缺少必要库")
+            return
+        
+        try:
+            self.audio_cleaner_ai_session = requests.Session()
+            self.update_audio_cleaner_ai_session_headers()
+            self.log("音频清理AI处理器已初始化")
+        except Exception as e:
+            self.log(f"音频清理AI处理器初始化失败: {e}")
+    
+    def update_voice_ai_session_headers(self):
+        """
+        更新语音转文字AI会话头信息
+        """
+        if self.voice_ai_session and self.voice_ai_config.get("api_key"):
+            self.voice_ai_session.headers.update({
+                "Content-Type": "application/json",
+                "x-api-key": self.voice_ai_config["api_key"],
+                "anthropic-version": "2023-06-01"
+            })
+    
+    def update_audio_cleaner_ai_session_headers(self):
+        """
+        更新音频清理AI会话头信息
+        """
+        if self.audio_cleaner_ai_session and self.audio_cleaner_ai_config.get("api_key"):
+            self.audio_cleaner_ai_session.headers.update({
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.audio_cleaner_ai_config['api_key']}"
+            })
+    
+    def process_text_with_voice_ai(self, text):
+        """
+        使用语音转文字AI处理文本
+        
+        参数:
+            text: 要处理的文本
+            
+        返回:
+            str: 处理后的文本
+        """
+        if not text or not text.strip():
+            return text
+        
+        if not self.voice_ai_enabled or not AI_PROCESSOR_AVAILABLE:
+            return text
+        
+        ai_format = self.voice_ai_config.get("ai_format", "openai")
+        
+        # Ollama不需要API密钥
+        if ai_format != "ollama" and not self.voice_ai_config.get("api_key"):
+            self.log("语音转文字AI处理失败：未设置API密钥")
+            return text
+        
+        try:
+            self.log(f"🔧 使用语音转文字模型: {self.voice_ai_config.get('model', 'gpt-3.5-turbo')}")
+            self.log(f"🌡️ 温度设置: {self.voice_ai_config.get('temperature', 0.1)}")
+            self.log(f"📋 AI格式: {ai_format.upper()}")
+            
+            # 构建提示词
+            prompt = self.get_voice_ai_prompt(text)
+            self.log(f"💭 发送语音转文字AI处理请求...")
+            
+            if ai_format == "openai":
+                # OpenAI格式调用
+                import openai
+                
+                # 格式化API URL
+                api_base = self.voice_ai_config.get("api_base", "https://api.openai.com")
+                formatted_url = self.format_voice_ai_api_url(ai_format, api_base)
+                
+                # 检查是否为OpenRouter并添加特殊头部
+                if "openrouter.ai" in formatted_url:
+                    client = openai.OpenAI(
+                        api_key=self.voice_ai_config.get("api_key", ""),
+                        base_url=formatted_url,
+                        timeout=30.0,
+                        default_headers={
+                            "HTTP-Referer": "https://github.com/voice-assistant",
+                            "X-Title": "Voice Assistant"
+                        }
+                    )
+                else:
+                    client = openai.OpenAI(
+                        api_key=self.voice_ai_config.get("api_key", ""),
+                        base_url=formatted_url,
+                        timeout=30.0
+                    )
+                
+                response = client.chat.completions.create(
+                    model=self.voice_ai_config.get("model", "gpt-3.5-turbo"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.voice_ai_config.get("temperature", 0.1),
+                    max_tokens=self.voice_ai_config.get("max_tokens", 1000)
+                )
+                
+                processed_text = response.choices[0].message.content.strip()
+                
+            elif ai_format == "ollama":
+                # Ollama格式调用
+                import openai
+                
+                api_base = self.voice_ai_config.get("api_base", "http://localhost:11434")
+                formatted_url = self.format_voice_ai_api_url(ai_format, api_base)
+                
+                client = openai.OpenAI(
+                    base_url=formatted_url,
+                    api_key="ollama",  # Ollama不需要真实的API Key
+                    timeout=30.0
+                )
+                
+                response = client.chat.completions.create(
+                    model=self.voice_ai_config.get("model", "llama3.1:8b"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.voice_ai_config.get("temperature", 0.1),
+                    max_tokens=self.voice_ai_config.get("max_tokens", 1000)
+                )
+                
+                processed_text = response.choices[0].message.content.strip()
+                
+            elif ai_format == "gemini":
+                # Gemini格式调用
+                import openai
+                
+                api_base = self.voice_ai_config.get("api_base", "https://generativelanguage.googleapis.com/v1beta")
+                formatted_url = self.format_voice_ai_api_url(ai_format, api_base)
+                
+                try:
+                    client = openai.OpenAI(
+                        api_key=self.voice_ai_config.get("api_key", ""),
+                        base_url=formatted_url,
+                        timeout=30.0
+                    )
+                    
+                    response = client.chat.completions.create(
+                        model=self.voice_ai_config.get("model", "gemini-1.5-flash"),
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=self.voice_ai_config.get("temperature", 0.1),
+                        max_tokens=self.voice_ai_config.get("max_tokens", 1000)
+                    )
+                    
+                    processed_text = response.choices[0].message.content.strip()
+                    
+                except Exception as gemini_error:
+                    self.log(f"⚠️ Gemini OpenAI兼容模式失败: {gemini_error}")
+                    self.log("💡 提示：请确保API URL包含完整的版本路径")
+                    return text
+            
+            if processed_text:
+                self.log(f"🎯 {ai_format.upper()}格式AI处理成功，获得优化文本")
+                return processed_text
+            else:
+                self.log("⚠️ AI返回的文本为空，返回原文")
+                return text
+                
+        except Exception as e:
+            self.log(f"❌ 语音转文字AI处理过程中出现错误: {str(e)}")
+            return text
+    
+    def process_text_with_audio_cleaner_ai(self, text):
+        """
+        使用音频清理AI处理文本
+        
+        参数:
+            text: 要处理的文本
+            
+        返回:
+            str: 处理后的文本
+        """
+        if not text or not text.strip():
+            return text
+        
+        if not self.audio_cleaner_ai_enabled or not AI_PROCESSOR_AVAILABLE:
+            return text
+        
+        if not self.audio_cleaner_ai_config.get("api_key"):
+            self.log("音频清理AI处理失败：未设置API密钥")
+            return text
+        
+        try:
+            self.log(f"🔧 使用音频清理模型: {self.audio_cleaner_ai_config.get('model', 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free')}")
+            self.log(f"🌡️ 温度设置: {self.audio_cleaner_ai_config.get('temperature', 0.1)}")
+            
+            # 构建提示词
+            prompt = self.get_audio_cleaner_ai_prompt(text)
+            self.log(f"💭 发送音频清理AI处理请求...")
+            
+            # 构建请求数据
+            request_data = {
+                "model": self.audio_cleaner_ai_config.get("model", "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"),
+                "max_tokens": self.audio_cleaner_ai_config.get("max_tokens", 1000),
+                "temperature": self.audio_cleaner_ai_config.get("temperature", 0.1),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            }
+            
+            # 发送请求
+            api_url = f"{self.audio_cleaner_ai_config.get('api_base', 'https://openrouter.ai/api/v1')}/v1/chat/completions"
+            self.log(f"🌐 请求音频清理API: {api_url}")
+            response = self.audio_cleaner_ai_session.post(api_url, json=request_data, timeout=30)
+            
+            if response.status_code == 200:
+                self.log(f"✅ 音频清理API请求成功 (状态码: {response.status_code})")
+                result = response.json()
+                processed_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                
+                if processed_text:
+                    self.log(f"🎯 音频清理AI处理成功，获得清理文本")
+                    return processed_text
+                else:
+                    self.log("⚠️ 音频清理AI返回的文本为空，返回原文")
+                    return text
+            else:
+                self.log(f"❌ 音频清理API请求失败，状态码: {response.status_code}")
+                try:
+                    error_info = response.json()
+                    self.log(f"📋 错误详情: {error_info}")
+                except:
+                    self.log(f"📋 响应内容: {response.text[:200]}...")
+                return text
+                
+        except Exception as e:
+            self.log(f"❌ 音频清理AI处理过程中出现错误: {str(e)}")
+            return text
+    
+    def get_voice_ai_prompt(self, text):
+        """
+        获取语音转文字AI处理提示词
+        
+        参数:
+            text: 要处理的文本
+            
+        返回:
+            str: 提示词
+        """
+        # 优先使用语音转文字专用提示词
+        voice_prompt = self.voice_ai_config.get("voice_prompt")
+        if voice_prompt:
+            return voice_prompt.format(text=text)
+        
+        # 其次使用通用自定义提示词
+        custom_prompt = self.voice_ai_config.get("custom_prompt")
+        if custom_prompt:
+            return custom_prompt.format(text=text)
+        
+        # 默认提示词
+        prompt = """你是一个专业的语音转录文本优化助手。请对以下语音转录的文本进行优化：
+
+1. 识别并修正语音识别中的错别字
+2. 修正语法错误和不通顺的表达
+3. 优化标点符号，使其更符合书面语规范
+4. 调整口语化表达，使其更清晰易懂
+5. 保持原文的核心意思和语气
+6. 识别并修正同音字错误
+7. 优化断句和段落结构
+8. 删除模型幻觉内容（即用户未说话时转录出的无意义文本）
+9. 识别并去除重复的表达
+
+请直接返回优化后的文本，不要添加任何解释或说明。
+
+原始语音转录文本：
+{text}
+
+优化后的文本："""
+        
+        return prompt.format(text=text)
+    
+    def get_audio_cleaner_ai_prompt(self, text):
+        """
+        获取音频清理AI处理提示词
+        
+        参数:
+            text: 要处理的文本
+            
+        返回:
+            str: 提示词
+        """
+        # 优先使用音频清理专用提示词
+        audio_cleanup_prompt = self.audio_cleaner_ai_config.get("audio_cleanup_prompt")
+        if audio_cleanup_prompt:
+            return audio_cleanup_prompt.format(text=text)
+        
+        # 其次使用通用自定义提示词
+        custom_prompt = self.audio_cleaner_ai_config.get("custom_prompt")
+        if custom_prompt:
+            return custom_prompt.format(text=text)
+        
+        # 默认提示词
+        prompt = """# TASK
+You are an audio cleanup AI. Analyze the transcript below and identify segments to be deleted.
+
+# RULES
+Delete the following types of content:
+1.  **Self-Corrections:** A broken/mistaken sentence immediately followed by a corrected, complete version of it. The first, broken one must be deleted.
+2.  **Repeated Takes:** Redundant repetitions of the same phrase. Keep only the last, best take.
+3.  **Noise & Errors:** Indecipherable audio, stutters, or segments ruined by non-speech noise (coughs, clicks).
+4.  **Fillers:** Excessive filler words ("uh", "um", "like", "you know"). Do not delete natural, short pauses for thought.
+5.  **Incomplete Sentences:** Remove sentences that are cut off or not completed.
+6.  **Unfinished Thoughts:** Delete segments where the speaker starts but doesn't complete their thought.
+
+# OUTPUT
+Return the cleaned transcript with only the complete, well-formed sentences.
+
+Original transcript:
+{text}
+
+Cleaned transcript:"""
+        
+        return prompt.format(text=text)
+    
+    def get_default_voice_prompt(self):
+        """
+        获取语音转文字的默认提示词
+        
+        返回:
+            str: 默认提示词
+        """
+        return """你是一个专业的语音转录文本优化助手。请对以下语音转录的文本进行优化：
+
+1. 识别并修正语音识别中的错别字
+2. 修正语法错误和不通顺的表达
+3. 优化标点符号，使其更符合书面语规范
+4. 调整口语化表达，使其更清晰易懂
+5. 保持原文的核心意思和语气
+6. 识别并修正同音字错误
+7. 优化断句和段落结构
+
+请直接返回优化后的文本，不要添加任何解释或说明。
+
+原始语音转录文本：
+{text}
+
+优化后的文本："""
+    
+    def get_default_audio_cleaner_prompt(self):
+        """
+        获取音频清理的默认提示词
+        
+        返回:
+            str: 默认提示词
+        """
+        return """# TASK
+You are an audio cleanup AI. Analyze the transcript below and identify segments to be deleted.
+
+# RULES
+Delete the following types of content:
+1.  **Self-Corrections:** A broken/mistaken sentence immediately followed by a corrected, complete version of it. The first, broken one must be deleted.
+2.  **Repeated Takes:** Redundant repetitions of the same phrase. Keep only the last, best take.
+3.  **Noise & Errors:** Indecipherable audio, stutters, or segments ruined by non-speech noise (coughs, clicks).
+4.  **Fillers:** Excessive filler words ("uh", "um", "like", "you know"). Do not delete natural, short pauses for thought.
+5.  **Incomplete Sentences:** Remove sentences that are cut off or not completed.
+6.  **Unfinished Thoughts:** Delete segments where the speaker starts but doesn't complete their thought.
+
+# OUTPUT
+Return the cleaned transcript with only the complete, well-formed sentences.
+
+Original transcript:
+{text}
+
+Cleaned transcript:"""
+    
+    def toggle_voice_ai_processor(self):
+        """
+        切换语音转文字AI处理器状态
+        """
+        self.voice_ai_enabled = not self.voice_ai_enabled
+        status = "启用" if self.voice_ai_enabled else "禁用"
+        self.log(f"语音转文字AI文本处理已{status}")
+        
+        # 更新界面状态变量
+        if hasattr(self, 'ai_enabled_var'):
+            self.ai_enabled_var.set(self.voice_ai_enabled)
+        
+        # 更新配置
+        self.voice_ai_config["enabled"] = self.voice_ai_enabled
+        self.save_voice_ai_config()
+    
+    def toggle_audio_cleaner_ai_processor(self):
+        """
+        切换音频清理AI处理器状态
+        """
+        self.audio_cleaner_ai_enabled = not self.audio_cleaner_ai_enabled
+        status = "启用" if self.audio_cleaner_ai_enabled else "禁用"
+        self.log(f"音频清理AI文本处理已{status}")
+        
+        # 更新配置
+        self.audio_cleaner_ai_config["enabled"] = self.audio_cleaner_ai_enabled
+        self.save_audio_cleaner_ai_config()
+    
+    def update_ai_config(self, **kwargs):
+        """
+        更新AI配置
+        
+        参数:
+            **kwargs: 配置项
+        """
+        for key, value in kwargs.items():
+            if key in self.ai_processor_config:
+                self.ai_processor_config[key] = value
+        
+        self.save_ai_config()
+        self.update_ai_session_headers()
+        self.log("AI配置已更新")
+    
+    
+    def show_voice_ai_settings_dialog(self):
+        """
+        显示语音转文字服务的AI设置对话框
+        """
+        if not AI_PROCESSOR_AVAILABLE:
+            messagebox.showwarning("警告", "AI处理功能不可用：缺少必要库")
+            return
+        
+        # 创建设置窗口
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("语音转文字AI设置")
+        settings_window.geometry("500x750")
+        settings_window.resizable(False, False)
+        
+        # 设置窗口居中
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        # 创建主框架和滚动条
+        main_canvas = tk.Canvas(settings_window)
+        scrollbar = ttk.Scrollbar(settings_window, orient="vertical", command=main_canvas.yview)
+        inner_frame = ttk.Frame(main_canvas)
+        
+        inner_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+        
+        main_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        main_canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=(20, 0))
+        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=(20, 0))
+        
+        # 标题
+        title_label = ttk.Label(inner_frame, text="语音转文字AI设置", font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # 启用AI处理
+        enabled_frame = ttk.Frame(inner_frame)
+        enabled_frame.pack(fill=tk.X, pady=5)
+        
+        enabled_var = tk.BooleanVar(value=self.voice_ai_enabled)
+        enabled_check = ttk.Checkbutton(enabled_frame, text="启用AI文本处理", variable=enabled_var,
+                                       command=lambda: self.toggle_voice_ai_processor())
+        enabled_check.pack(side=tk.LEFT)
+        
+        # API设置
+        api_frame = ttk.LabelFrame(inner_frame, text="API设置", padding="10")
+        api_frame.pack(fill=tk.X, pady=10)
+        
+        # AI格式选择
+        format_frame = ttk.Frame(api_frame)
+        format_frame.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+        
+        ttk.Label(format_frame, text="AI格式:").pack(side=tk.LEFT, padx=5)
+        ai_format_var = tk.StringVar(value=self.voice_ai_config.get("ai_format", "openai"))
+        ai_format_combo = ttk.Combobox(format_frame, textvariable=ai_format_var, width=15)
+        ai_format_combo['values'] = ["openai", "ollama", "gemini"]
+        ai_format_combo.pack(side=tk.LEFT, padx=5)
+        ai_format_combo.bind("<<ComboboxSelected>>", lambda e: self.update_voice_ai_format_ui(ai_format_var.get()))
+        
+        # 格式说明标签
+        format_info_var = tk.StringVar()
+        format_info_label = ttk.Label(format_frame, textvariable=format_info_var, 
+                                    font=("Microsoft YaHei", 9), foreground="#6c757d")
+        format_info_label.pack(side=tk.LEFT, padx=10)
+        
+        # API密钥
+        ttk.Label(api_frame, text="API密钥:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        api_key_var = tk.StringVar(value=self.voice_ai_config.get("api_key", ""))
+        api_key_entry = ttk.Entry(api_frame, textvariable=api_key_var, width=50, show="*")
+        api_key_entry.grid(row=1, column=1, pady=5)
+        
+        # API基础URL
+        ttk.Label(api_frame, text="API地址:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        api_base_var = tk.StringVar(value=self.voice_ai_config.get("api_base", ""))
+        api_base_entry = ttk.Entry(api_frame, textvariable=api_base_var, width=50)
+        api_base_entry.grid(row=2, column=1, pady=5)
+        
+        # 模型选择
+        ttk.Label(api_frame, text="模型:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        model_var = tk.StringVar(value=self.voice_ai_config.get("model", ""))
+        model_combo = ttk.Combobox(api_frame, textvariable=model_var, width=47)
+        model_combo.grid(row=3, column=1, pady=5)
+        
+        # 初始化UI
+        self.update_voice_ai_format_ui(ai_format_var.get(), format_info_var, model_combo)
+        
+        # 处理设置
+        processing_frame = ttk.LabelFrame(inner_frame, text="处理设置", padding="10")
+        processing_frame.pack(fill=tk.X, pady=10)
+        
+        # 最大令牌数
+        ttk.Label(processing_frame, text="最大令牌数:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        max_tokens_var = tk.StringVar(value=str(self.voice_ai_config.get("max_tokens", 1000)))
+        max_tokens_entry = ttk.Entry(processing_frame, textvariable=max_tokens_var, width=20)
+        max_tokens_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
+        
+        # 温度
+        ttk.Label(processing_frame, text="温度:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        temperature_var = tk.StringVar(value=str(self.voice_ai_config.get("temperature", 0.1)))
+        temperature_entry = ttk.Entry(processing_frame, textvariable=temperature_var, width=20)
+        temperature_entry.grid(row=1, column=1, sticky=tk.W, pady=5)
+        
+        # 处理选项
+        options_frame = ttk.LabelFrame(inner_frame, text="处理选项", padding="10")
+        options_frame.pack(fill=tk.X, pady=10)
+        
+        auto_correct_var = tk.BooleanVar(value=self.voice_ai_config.get("auto_correct", True))
+        auto_correct_check = ttk.Checkbutton(options_frame, text="自动纠错", variable=auto_correct_var)
+        auto_correct_check.pack(anchor=tk.W, pady=2)
+        
+        grammar_check_var = tk.BooleanVar(value=self.voice_ai_config.get("grammar_check", True))
+        grammar_check_check = ttk.Checkbutton(options_frame, text="语法检查", variable=grammar_check_var)
+        grammar_check_check.pack(anchor=tk.W, pady=2)
+        
+        semantic_var = tk.BooleanVar(value=self.voice_ai_config.get("semantic_optimization", True))
+        semantic_check = ttk.Checkbutton(options_frame, text="语义优化", variable=semantic_var)
+        semantic_check.pack(anchor=tk.W, pady=2)
+        
+        # 语音转文字专用提示词设置
+        voice_prompt_frame = ttk.LabelFrame(inner_frame, text="语音转文字专用提示词", padding="10")
+        voice_prompt_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # 预设提示词选择
+        preset_frame = ttk.Frame(voice_prompt_frame)
+        preset_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(preset_frame, text="预设模板:").pack(side=tk.LEFT, padx=5)
+        preset_var = tk.StringVar(value="standard")
+        preset_combo = ttk.Combobox(preset_frame, textvariable=preset_var, width=30)
+        preset_combo['values'] = [
+            "standard", "formal", "casual", "academic", "business", "creative"
+        ]
+        preset_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 自定义提示词
+        ttk.Label(voice_prompt_frame, text="自定义提示词 (使用 {text} 作为文本占位符):").pack(anchor=tk.W, pady=(10, 5))
+        
+        prompt_text = tk.Text(voice_prompt_frame, height=8, width=50)
+        prompt_text.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # 加载当前提示词
+        current_prompt = self.voice_ai_config.get("voice_prompt", self.get_default_voice_prompt())
+        if current_prompt:
+            prompt_text.insert("1.0", current_prompt)
+        
+        # 预设模板切换
+        def on_preset_change(event=None):
+            preset = preset_var.get()
+            templates = {
+                "standard": "请优化以下语音转录文本，修正错别字和语法错误，保持原意不变：\n\n{text}",
+                "formal": "请将以下语音转录文本转换为更正式的表达方式：\n\n{text}",
+                "casual": "请将以下语音转录文本调整为更自然的口语化表达：\n\n{text}",
+                "academic": "请将以下语音转录文本优化为学术写作风格：\n\n{text}",
+                "business": "请将以下语音转录文本优化为商务沟通风格：\n\n{text}",
+                "creative": "请将以下语音转录文本优化为更有创意的表达方式：\n\n{text}"
+            }
+            if preset in templates:
+                prompt_text.delete("1.0", tk.END)
+                prompt_text.insert("1.0", templates[preset])
+        
+        preset_combo.bind("<<ComboboxSelected>>", on_preset_change)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(inner_frame)
+        button_frame.pack(fill=tk.X, pady=20)
+        
+        # 保存设置
+        def save_voice_ai_settings():
+            try:
+                # 验证输入
+                if not api_key_var.get().strip():
+                    messagebox.showwarning("警告", "API密钥不能为空")
+                    return
+                
+                max_tokens = int(max_tokens_var.get())
+                if max_tokens <= 0 or max_tokens > 100000:
+                    messagebox.showwarning("警告", "最大令牌数必须在1-100000之间")
+                    return
+                
+                temperature = float(temperature_var.get())
+                if temperature < 0 or temperature > 2:
+                    messagebox.showwarning("警告", "温度必须在0-2之间")
+                    return
+                
+                # 保存设置
+                self.voice_ai_config["api_key"] = api_key_var.get().strip()
+                self.voice_ai_config["api_base"] = api_base_var.get().strip()
+                self.voice_ai_config["model"] = model_var.get()
+                self.voice_ai_config["max_tokens"] = max_tokens
+                self.voice_ai_config["temperature"] = temperature
+                self.voice_ai_config["auto_correct"] = auto_correct_var.get()
+                self.voice_ai_config["grammar_check"] = grammar_check_var.get()
+                self.voice_ai_config["semantic_optimization"] = semantic_var.get()
+                self.voice_ai_config["ai_format"] = ai_format_var.get()
+                
+                # 保存语音转文字专用提示词
+                custom_prompt = prompt_text.get("1.0", tk.END).strip()
+                self.voice_ai_config["voice_prompt"] = custom_prompt if custom_prompt else None
+                
+                self.save_voice_ai_config()
+                self.update_voice_ai_session_headers()
+                
+                # 更新启用状态
+                new_enabled_state = enabled_var.get()
+                if new_enabled_state != self.voice_ai_enabled:
+                    self.voice_ai_enabled = new_enabled_state
+                    # 更新界面状态变量
+                    if hasattr(self, 'ai_enabled_var'):
+                        self.ai_enabled_var.set(self.voice_ai_enabled)
+                    # 更新配置
+                    self.voice_ai_config["enabled"] = self.voice_ai_enabled
+                    self.log(f"语音转文字AI文本处理已{'启用' if self.voice_ai_enabled else '禁用'}")
+                
+                messagebox.showinfo("成功", "语音转文字AI设置已保存")
+                settings_window.destroy()
+                
+            except ValueError as e:
+                messagebox.showerror("错误", f"输入格式错误：{str(e)}")
+        
+        save_btn = ttk.Button(button_frame, text="保存", command=save_voice_ai_settings)
+        save_btn.pack(side=tk.RIGHT, padx=5)
+        
+        cancel_btn = ttk.Button(button_frame, text="取消", command=settings_window.destroy)
+        cancel_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 测试按钮
+        def test_voice_ai():
+            test_text = "这是一个测试文本，包含一些可能的错误。今天天气很好，我想去公园散步。"
+            result = self.process_text_with_voice_ai(test_text)
+            if result != test_text:
+                messagebox.showinfo("测试成功", f"语音转文字AI处理正常。\n原文: {test_text}\n处理后: {result}")
+            else:
+                messagebox.showinfo("测试结果", "AI处理完成，但文本无变化或处理失败。")
+        
+        test_btn = ttk.Button(button_frame, text="测试", command=test_voice_ai)
+        test_btn.pack(side=tk.LEFT, padx=5)
+
+    def show_audio_cleaner_ai_settings_dialog(self):
+        """
+        显示音频清理服务的AI设置对话框
+        """
+        if not AI_PROCESSOR_AVAILABLE:
+            messagebox.showwarning("警告", "AI处理功能不可用：缺少必要库")
+            return
+        
+        # 创建设置窗口
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("音频清理AI设置")
+        settings_window.geometry("500x750")
+        settings_window.resizable(False, False)
+        
+        # 设置窗口居中
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        # 创建主画布和滚动条
+        main_canvas = tk.Canvas(settings_window)
+        scrollbar = ttk.Scrollbar(settings_window, orient="vertical", command=main_canvas.yview)
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # 创建可滚动的主框架
+        main_frame = ttk.Frame(main_canvas)
+        main_canvas_frame = main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        
+        # 布局画布和滚动条
+        main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # 配置滚动区域
+        def configure_scroll_region(event=None):
+            main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+            # 确保窗口宽度足够
+            min_width = main_frame.winfo_reqwidth() + scrollbar.winfo_reqwidth()
+            settings_window.geometry(f"{max(500, min_width)}x750")
+        
+        main_frame.bind("<Configure>", configure_scroll_region)
+        settings_window.bind("<Configure>", lambda e: main_canvas.itemconfig(main_canvas_frame, width=settings_window.winfo_width() - scrollbar.winfo_width() - 40))
+        
+        # 添加内部填充
+        inner_frame = ttk.Frame(main_frame, padding="20")
+        inner_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 标题
+        title_label = ttk.Label(inner_frame, text="音频清理AI设置", font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # 启用AI处理
+        enabled_frame = ttk.Frame(inner_frame)
+        enabled_frame.pack(fill=tk.X, pady=5)
+        
+        enabled_var = tk.BooleanVar(value=self.audio_cleaner_ai_enabled)
+        enabled_check = ttk.Checkbutton(enabled_frame, text="启用AI文本清理", variable=enabled_var,
+                                       command=lambda: self.toggle_audio_cleaner_ai_processor())
+        enabled_check.pack(side=tk.LEFT)
+        
+        # API设置
+        api_frame = ttk.LabelFrame(inner_frame, text="API设置", padding="10")
+        api_frame.pack(fill=tk.X, pady=10)
+        
+        # API密钥
+        ttk.Label(api_frame, text="API密钥:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        api_key_var = tk.StringVar(value=self.audio_cleaner_ai_config.get("api_key", ""))
+        api_key_entry = ttk.Entry(api_frame, textvariable=api_key_var, width=50, show="*")
+        api_key_entry.grid(row=0, column=1, pady=5)
+        
+        # API基础URL
+        ttk.Label(api_frame, text="API地址:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        api_base_var = tk.StringVar(value=self.audio_cleaner_ai_config.get("api_base", ""))
+        api_base_entry = ttk.Entry(api_frame, textvariable=api_base_var, width=50)
+        api_base_entry.grid(row=1, column=1, pady=5)
+        
+        # 模型选择
+        ttk.Label(api_frame, text="模型:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        model_var = tk.StringVar(value=self.audio_cleaner_ai_config.get("model", ""))
+        model_combo = ttk.Combobox(api_frame, textvariable=model_var, width=47)
+        model_combo['values'] = [
+            "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+            "gpt-3.5-turbo",
+            "gpt-4",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307"
+        ]
+        model_combo.grid(row=2, column=1, pady=5)
+        
+        # 处理设置
+        processing_frame = ttk.LabelFrame(inner_frame, text="处理设置", padding="10")
+        processing_frame.pack(fill=tk.X, pady=10)
+        
+        # 最大令牌数
+        ttk.Label(processing_frame, text="最大令牌数:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        max_tokens_var = tk.StringVar(value=str(self.audio_cleaner_ai_config.get("max_tokens", 1000)))
+        max_tokens_entry = ttk.Entry(processing_frame, textvariable=max_tokens_var, width=20)
+        max_tokens_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
+        
+        # 温度
+        ttk.Label(processing_frame, text="温度:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        temperature_var = tk.StringVar(value=str(self.audio_cleaner_ai_config.get("temperature", 0.1)))
+        temperature_entry = ttk.Entry(processing_frame, textvariable=temperature_var, width=20)
+        temperature_entry.grid(row=1, column=1, sticky=tk.W, pady=5)
+        
+        # 音频清理专用提示词设置
+        prompt_frame = ttk.LabelFrame(inner_frame, text="音频清理专用提示词", padding="10")
+        prompt_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # 预设提示词选择
+        preset_frame = ttk.Frame(prompt_frame)
+        preset_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(preset_frame, text="预设模板:").pack(side=tk.LEFT, padx=5)
+        preset_var = tk.StringVar(value="standard")
+        preset_combo = ttk.Combobox(preset_frame, textvariable=preset_var, width=30)
+        preset_combo['values'] = [
+            "standard", "aggressive", "conservative", "academic", "casual"
+        ]
+        preset_combo.pack(side=tk.LEFT, padx=5)
+        
+        # 自定义提示词
+        ttk.Label(prompt_frame, text="自定义提示词 (使用 {text} 作为文本占位符):").pack(anchor=tk.W, pady=(10, 5))
+        
+        prompt_text = tk.Text(prompt_frame, height=8, width=50)
+        prompt_text.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # 加载当前提示词
+        current_prompt = self.audio_cleaner_ai_config.get("audio_cleanup_prompt", self.get_default_audio_cleaner_prompt())
+        if current_prompt:
+            prompt_text.insert("1.0", current_prompt)
+        
+        # 预设模板切换
+        def on_preset_change(event=None):
+            preset = preset_var.get()
+            templates = {
+                "standard": "# TASK\nYou are an audio cleanup AI. Analyze the transcript below and identify segments to be deleted.\n\n# RULES\nDelete the following types of content:\n1.  **Self-Corrections:** A broken/mistaken sentence immediately followed by a corrected, complete version of it. The first, broken one must be deleted.\n2.  **Repeated Takes:** Redundant repetitions of the same phrase. Keep only the last, best take.\n3.  **Noise & Errors:** Indecipherable audio, stutters, or segments ruined by non-speech noise (coughs, clicks).\n4.  **Fillers:** Excessive filler words (\"uh\", \"um\", \"like\", \"you know\"). Do not delete natural, short pauses for thought.\n5.  **Incomplete Sentences:** Remove sentences that are cut off or not completed.\n6.  **Unfinished Thoughts:** Delete segments where the speaker starts but doesn't complete their thought.\n\n# OUTPUT\nReturn the cleaned transcript with only the complete, well-formed sentences.\n\nOriginal transcript:\n{text}\n\nCleaned transcript:",
+                "aggressive": "# TASK\nYou are an aggressive audio cleanup AI. Remove all imperfect content.\n\n# RULES\nDelete: self-corrections, repetitions, noise, stutters, filler words, incomplete sentences, unfinished thoughts, hesitations, and minor grammatical errors.\n\n# OUTPUT\nReturn only the perfect, complete sentences.\n\nOriginal transcript:\n{text}\n\nCleaned transcript:",
+                "conservative": "# TASK\nYou are a conservative audio cleanup AI. Only remove obvious errors.\n\n# RULES\nDelete only: indecipherable noise, severe stutters, and obvious incomplete sentences.\nKeep most content including minor filler words and hesitations.\n\n# OUTPUT\nReturn the transcript with minimal cleaning.\n\nOriginal transcript:\n{text}\n\nCleaned transcript:",
+                "academic": "# TASK\nYou are an academic audio cleanup AI. Clean transcripts for formal presentations.\n\n# RULES\nDelete: informal language, filler words, self-corrections, repetitions, and incomplete thoughts.\nPreserve: technical terms, formal expressions, and complete academic sentences.\n\n# OUTPUT\nReturn a clean, formal transcript suitable for academic contexts.\n\nOriginal transcript:\n{text}\n\nCleaned transcript:",
+                "casual": "# TASK\nYou are a casual audio cleanup AI. Clean transcripts while keeping natural conversation flow.\n\n# RULES\nDelete: obvious errors, repetitions, and noise.\nKeep: natural filler words, conversational tone, and minor hesitations that make speech sound authentic.\n\n# OUTPUT\nReturn a clean but natural-sounding conversation transcript.\n\nOriginal transcript:\n{text}\n\nCleaned transcript:"
+            }
+            if preset in templates:
+                prompt_text.delete("1.0", tk.END)
+                prompt_text.insert("1.0", templates[preset])
+        
+        preset_combo.bind("<<ComboboxSelected>>", on_preset_change)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(inner_frame)
+        button_frame.pack(fill=tk.X, pady=20)
+        
+        # 保存设置
+        def save_audio_cleaner_ai_settings():
+            try:
+                # 验证输入
+                if not api_key_var.get().strip():
+                    messagebox.showwarning("警告", "API密钥不能为空")
+                    return
+                
+                max_tokens = int(max_tokens_var.get())
+                if max_tokens <= 0 or max_tokens > 100000:
+                    messagebox.showwarning("警告", "最大令牌数必须在1-100000之间")
+                    return
+                
+                temperature = float(temperature_var.get())
+                if temperature < 0 or temperature > 2:
+                    messagebox.showwarning("警告", "温度必须在0-2之间")
+                    return
+                
+                # 保存设置
+                self.audio_cleaner_ai_config["api_key"] = api_key_var.get().strip()
+                self.audio_cleaner_ai_config["api_base"] = api_base_var.get().strip()
+                self.audio_cleaner_ai_config["model"] = model_var.get()
+                self.audio_cleaner_ai_config["max_tokens"] = max_tokens
+                self.audio_cleaner_ai_config["temperature"] = temperature
+                
+                # 保存音频清理专用提示词
+                custom_prompt = prompt_text.get("1.0", tk.END).strip()
+                self.audio_cleaner_ai_config["audio_cleanup_prompt"] = custom_prompt if custom_prompt else None
+                
+                self.save_audio_cleaner_ai_config()
+                self.update_audio_cleaner_ai_session_headers()
+                
+                # 更新启用状态
+                if enabled_var.get() != self.audio_cleaner_ai_enabled:
+                    self.toggle_audio_cleaner_ai_processor()
+                
+                messagebox.showinfo("成功", "音频清理AI设置已保存")
+                settings_window.destroy()
+                
+            except ValueError as e:
+                messagebox.showerror("错误", f"输入格式错误：{str(e)}")
+        
+        save_btn = ttk.Button(button_frame, text="保存", command=save_audio_cleaner_ai_settings)
+        save_btn.pack(side=tk.RIGHT, padx=5)
+        
+        cancel_btn = ttk.Button(button_frame, text="取消", command=settings_window.destroy)
+        cancel_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 测试按钮
+        def test_audio_cleaner_ai():
+            test_text = "嗯...今天我想去公园，不对，我是说想去图书馆。那里很安静适合学习。呃...我想借一些关于编程的书籍。"
+            result = self.process_text_with_audio_cleaner_ai(test_text)
+            if result != test_text:
+                messagebox.showinfo("测试成功", f"音频清理AI处理正常。\n原文: {test_text}\n处理后: {result}")
+            else:
+                messagebox.showinfo("测试结果", "音频清理AI处理完成，但文本无变化或处理失败。")
+        
+        test_btn = ttk.Button(button_frame, text="测试", command=test_audio_cleaner_ai)
+        test_btn.pack(side=tk.LEFT, padx=5)
 
 
 def main():
