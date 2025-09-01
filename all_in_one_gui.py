@@ -4510,7 +4510,7 @@ Cleaned transcript:"""
         ai_format_combo = ttk.Combobox(format_frame, textvariable=ai_format_var, width=15)
         ai_format_combo['values'] = ["openai", "ollama", "gemini"]
         ai_format_combo.pack(side=tk.LEFT, padx=5)
-        ai_format_combo.bind("<<ComboboxSelected>>", lambda e: self.update_voice_ai_format_ui(ai_format_var.get()))
+        ai_format_combo.bind("<<ComboboxSelected>>", lambda e: self.update_voice_ai_format_ui(ai_format_var.get(), format_info_var, model_combo))
         
         # 格式说明标签
         format_info_var = tk.StringVar()
