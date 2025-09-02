@@ -1,228 +1,212 @@
-# 🎙️ FlowWhisper
+# 🎙️ Audio Transcription & Cleaning Suite
 
-A comprehensive audio transcription tool based on whisper.cpp with intelligent audio cleaning and multi-AI format support.
+A comprehensive audio processing platform powered by whisper.cpp, featuring single-file transcription, batch processing, real-time voice-to-text service, and AI-powered audio cleaning capabilities.
 
-## ✨ Features
+## ✨ Key Features
 
-### Core Functionality
-- **Single File Transcription**: Transcribe individual audio files with multiple output formats
-- **Batch Transcription**: Process entire directories of audio files
-- **Voice-to-Text Service**: Real-time transcription using Caps Lock key
-- **Intelligent Audio Cleaning**: AI-powered audio quality improvement
+### 1. Single File Transcription
+- Multiple audio format support (WAV, MP3, OGG, FLAC, M4A)
+- Multiple output formats (TXT, SRT, VTT, JSON)
+- Multi-language transcription support
+- Real-time progress tracking
 
-### Advanced Features
-- **Multi-AI Format Support**: OpenAI, Ollama, and Gemini API compatibility
-- **Secondary Transcription**: Enhanced accuracy through dual-pass transcription
-- **HRT Subtitle Generation**: Optimized subtitle files with proper timing
-- **Smart URL Processing**: Automatic API endpoint formatting
+### 2. Batch Transcription
+- Process entire directories of audio files
+- Selective file type processing
+- Unified output format settings
+- Progress tracking and error handling
 
-### Supported Formats
-- **Audio**: WAV, MP3, OGG, FLAC, M4A
-- **Output**: TXT, SRT, VTT, JSON, HRT
-- **Languages**: Auto-detection, English, Chinese, Japanese, Korean, Spanish, French, German
+### 3. Voice-to-Text Service
+- Press and hold Caps Lock to record
+- Automatic transcription and clipboard copy
+- Real-time status display
+- Automatic temporary file cleanup
+
+### 4. AI Audio Cleaning 🆕
+- AI-powered audio content analysis
+- Automatic detection and removal of low-quality segments
+- Customizable cleaning rules
+- Output cleaned audio files
+
+### 5. Secondary Transcription & HRT Subtitle Generation 🎬
+- Perform speech recognition on cleaned audio for higher accuracy
+- Generate high-quality HRT format subtitle files
+- Intelligent filtering of meaningless segments and noise
+- Optimized subtitle display timing (2-5 second standard)
+- Automatic punctuation cleanup
+- Clear operational guidance and real-time status feedback
 
 ## 🛠️ Installation
 
-### Prerequisites
+### Method 1: Installation Script (Recommended)
+1. Double-click `install_dependencies.bat`
+2. Wait for all dependencies to install
+3. Run `python all_in_one_gui.py` to start the program
+
+### Method 2: Manual Installation
+```bash
+# Upgrade pip
+pip install --upgrade pip
+
+# Install core dependencies
+pip install numpy>=1.21.0 scipy>=1.7.0 openai>=1.100.0
+
+# Install audio processing libraries
+pip install pydub>=0.25.1 sounddevice>=0.4.5
+
+# Install system interaction libraries
+pip install pyperclip>=1.8.0 pynput>=1.7.0
+```
+
+## 📋 System Requirements
+
 - Python 3.7+
 - Windows 10/11
-- At least 4GB RAM
+- Minimum 4GB RAM
 - Microphone (for voice-to-text service)
 
-### Quick Setup
-1. **Clone or download this repository**
-2. **Install dependencies**:
-   ```bash
-   # Run the automated installer
-   install_dependencies.bat
-   ```
-   OR
-   ```bash
-   # Manual installation
-   pip install -r requirements.txt
-   ```
+## 🎯 Usage Guide
 
-3. **Download whisper.cpp components**:
-   - Download whisper-cli.exe and required DLL files
-   - Download Whisper model files (.bin)
-   - Place them in the project directory
-
-### File Requirements
-
-#### Required Files
-- **whisper-cli.exe**: Command line tool from whisper.cpp
-- **Model files (.bin)**: Whisper models like `ggml-base.bin`
-- **DLL files**: Dynamic link libraries required by whisper-cli.exe
-
-#### Model File Placement
-Place downloaded Whisper model files in one of these locations:
-- `models/` directory
-- `whisper/models/` directory
-- Project root directory
-
-#### Preparation Steps
-1. Download whisper.cpp release package
-2. Extract to project directory and rename to `whisper`
-3. Download required model files and place in `models/` directory
-4. Ensure `whisper-cli.exe` is in project root or `whisper/` directory
-
-#### Model Downloads
-Download model files from:
-- [whisper.cpp releases](https://github.com/ggerganov/whisper.cpp/releases)
-- [Hugging Face](https://huggingface.co/ggerganov/whisper)
-
-#### Recommended Models
-- `ggml-base.bin`: Base model, balanced performance and accuracy
-- `ggml-small.bin`: Small model, faster speed
-- `ggml-medium.bin`: Medium model, good accuracy
-- `ggml-large-v3.bin`: Large model, best accuracy
-
-### Directory Structure
-```
-FlowWhisper/
-├── all_in_one_gui.py          # Main GUI application
-├── requirements.txt           # Python dependencies
-├── install_dependencies.bat   # Automated installer
-├── audio_cleaner_config.json  # AI configuration template
-├── models/                    # Whisper model files (empty - add your own)
-├── tests/                     # Test scripts
-├── docs/                      # Documentation
-├── LICENSE                    # MIT License
-├── .gitignore                 # Git ignore rules
-└── README.md                  # This file
-```
-
-## 🎯 Usage
-
-### Starting the Application
+### Starting the Program
 ```bash
-# Full-featured GUI (recommended)
+# Full-featured version (recommended)
 python all_in_one_gui.py
+
+# Basic transcription version
+python transcribe_gui.py
 ```
 
-### Intelligent Audio Cleaning
+### Smart Audio Cleaning Configuration
+1. In the "Smart Audio Cleaning" tab
+2. Follow the workflow indicator: 📁 Select Audio → ⚙️ Configure API → 🧹 AI Cleaning → 🎬 Generate Subtitles
+3. Choose AI format (OpenAI/Ollama/Gemini)
+4. Use quick configuration buttons for common AI services:
+   - 🌐 OpenRouter: Cloud AI service
+   - 🦙 Ollama: Local AI model (no API key required)
+   - 💎 Gemini: Google AI service
+5. Click "📋 Paste" to paste your API Key (not required for Ollama)
+6. Click "🧪 Test Connection" to verify configuration
+7. Select audio file (output path automatically set)
+8. Choose whether to enable secondary transcription and HRT subtitle generation
+9. Click "🚀 Start Smart Cleaning" to process
 
-1. **Select Audio**: Choose your audio file
-2. **Configure AI**: Select AI format and enter API credentials
-3. **Process**: Click "Start Intelligent Cleaning"
-4. **Generate Subtitles**: Enable secondary transcription for HRT subtitles
+### AI Format Support
+- **OpenAI Format**: Standard OpenAI-compatible interface, automatically adds /v1 suffix
+- **Ollama Format**: Local AI model service, no API key required, default address: http://localhost:11434
+- **Gemini Format**: Google Gemini API, requires complete API path
 
-#### AI Format Support
-- **OpenAI**: Standard OpenAI-compatible APIs (automatically adds /v1 suffix)
-- **Ollama**: Local AI models (no API key required)
-- **Gemini**: Google Gemini API
-
-#### Quick Configuration
-- 🌐 **OpenRouter**: Cloud AI services
-- 🦙 **Ollama**: Local AI models
-- 💎 **Gemini**: Google AI services
-
-### Voice-to-Text Service
-1. Click "Start Service"
-2. Hold **Caps Lock** to record
-3. Release to transcribe and copy to clipboard
-
-## 📋 Configuration
-
-### AI Configuration
-Edit `audio_cleaner_config.json`:
-```json
-{
-  "ai_format": "openai",
-  "api_url": "https://openrouter.ai",
-  "api_key": "YOUR_API_KEY_HERE",
-  "model": "gpt-3.5-turbo"
-}
-```
+### New Feature Highlights
+- **Multi-AI Format Support**: Supports OpenAI, Ollama, and Gemini formats
+- **Smart URL Processing**: OpenAI format automatically adds /v1 suffix, users only need to enter base URL
+- **Secondary Transcription**: Perform speech recognition on cleaned audio for higher accuracy
+- **HRT Subtitles**: Generate standard-compliant subtitle files with optimized timing and content
+- **Real-time Status**: Detailed step progress display during processing
+- **Smart Guidance**: Clear operational instructions and workflow indicators in the interface
 
 ### Supported AI Services
-- **OpenAI API**
-- **OpenRouter API**
-- **Any OpenAI-compatible API**
-- **Ollama local models**
-- **Google Gemini API**
+- OpenAI API
+- OpenRouter API
+- Other OpenAI-compatible API services
 
-## 🧪 Testing
+## 🎨 Interface Features
 
-Run the test scripts to verify functionality:
+- 🎨 Modern UI design with Chinese language support
+- 📊 Real-time status indicators and progress display
+- 🎵 Intuitive audio file operation interface
+- 🧪 One-click API connection testing
+- 📋 Convenient paste functionality
+- 🔄 Smart error handling and prompts
+
+## Component Overview
+
+### Core Libraries
+
+- `whisper.dll` - Core functionality library
+- `ggml.dll`, `ggml-cpu.dll`, `ggml-cuda.dll`, `ggml-base.dll` - Machine learning inference engines
+- CUDA libraries - For GPU acceleration (`cublas64_12.dll`, `cublasLt64_12.dll`, `cudart64_12.dll`, `nvblas64_12.dll`, `nvrtc-builtins64_124.dll`, `nvrtc64_120_0.dll`)
+
+### Command Line Tools
+
+- `whisper-cli.exe` - Basic command-line transcription tool
+- `whisper-stream.exe` - Real-time audio stream transcription tool
+- `whisper-server.exe` - Transcription server providing API services
+- `whisper-command.exe` - Command control tool
+- `whisper-bench.exe` - Performance benchmarking tool
+- `whisper-talk-llama.exe` - Conversation tool integrated with LLaMA models
+
+### Auxiliary Tools
+
+- `test-vad.exe`, `test-vad-full.exe` - Voice activity detection testing tools
+- `vad-speech-segments.exe` - Speech segment extraction tool
+- `quantize.exe` - Model quantization tool
+
+### GUI Applications
+
+- `all_in_one_gui.py` - Full-featured GUI application
+- `start_all_in_one_gui.bat` - Batch script to launch the GUI
+- `voice_to_text_service.py` - Voice-to-text background service
+- `start_voice_service.bat` - Batch script to start the voice-to-text service
+
+## Usage Examples
+
+### Basic Transcription
 
 ```bash
-# Test GUI functionality
-python tests/test_gui.py
-
-# Test AI format features
-python tests/test_ai_format.py
+whisper-cli.exe -m models/ggml-base.en.bin -f audio.wav -otxt
 ```
 
-## 📚 API Reference
+### Real-time Audio Stream Transcription
 
-### OpenAI Format
-- **URL Format**: Automatically appends `/v1` to base URL
-- **Authentication**: API Key in header
-- **Models**: gpt-3.5-turbo, gpt-4, claude series, etc.
+```bash
+whisper-stream.exe -m models/ggml-base.en.bin
+```
 
-### Ollama Format
-- **URL Format**: Automatically appends `/api` to base URL
-- **Authentication**: None required for local models
-- **Models**: llama3.1, qwen2.5, mistral, etc.
+### Start Transcription Server
 
-### Gemini Format
-- **URL Format**: Uses full API path as provided
-- **Authentication**: API Key in header
-- **Models**: gemini-1.5-flash, gemini-1.5-pro, etc.
+```bash
+whisper-server.exe -m models/ggml-base.en.bin -p 8080
+```
 
-## 🔧 Troubleshooting
+### Using the GUI Application
 
-### Common Issues
+1. Double-click `start_all_in_one_gui.bat` to launch the full-featured GUI
+2. Select the desired function tab:
+   - Single File Transcription: Transcribe individual audio files
+   - Batch Transcription: Transcribe all audio files in a specified directory
+   - Voice-to-Text Service: Press and hold spacebar to record, release to auto-transcribe and copy to clipboard
 
-1. **Missing Dependencies**
-   - Run `install_dependencies.bat`
-   - Ensure Python 3.7+ is installed
+### Using Voice-to-Text Service
 
-2. **Whisper CLI Not Found**
-   - Download whisper-cli.exe and place in project directory
-   - Ensure all required DLL files are present
+1. In the GUI, switch to the "Voice-to-Text Service" tab
+2. Click the "Start Service" button
+3. Press and hold spacebar to start recording
+4. Release spacebar to end recording, system will automatically transcribe and copy text to clipboard
+5. Click "Stop Service" to stop the service
 
-3. **Model Files Missing**
-   - Download Whisper model files (.bin)
-   - Place them in the `models/` directory
+## Model Downloads
 
-4. **API Connection Issues**
-   - Verify API keys are correct
-   - Check network connectivity
-   - Test with "Test Connection" button
+Before use, you need to download Whisper models. Models can be obtained from:
 
-5. **Audio Processing Errors**
-   - Ensure audio files are in supported formats
-   - Check file permissions
-   - Verify sufficient disk space
+1. Official pre-trained models: [https://github.com/openai/whisper/](https://github.com/openai/whisper/)
+2. ggml format models: [https://huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
 
-## 🤝 Contributing
+After downloading, place the model files in the `models` directory.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+## System Requirements
 
-## 📝 License
+- Windows operating system
+- For GPU acceleration: NVIDIA graphics card with CUDA support
+- Sufficient RAM (minimum 4GB, depending on model size)
+- Python 3.6+ (for GUI applications)
+- Dependencies: tkinter, numpy, sounddevice, pynput, pyperclip, scipy (for voice-to-text service)
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Important Notes
 
-## 🙏 Acknowledgments
+- Transcription quality depends on model size and audio quality
+- Larger models provide higher accuracy but require more computational resources
+- GPU acceleration can significantly improve transcription speed
 
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - Core whisper functionality
-- [OpenAI](https://openai.com/) - AI API services
-- [Ollama](https://ollama.com/) - Local AI models
-- [Google Gemini](https://ai.google.dev/) - Google AI services
+## References
 
-## 📞 Support
-
-For issues and questions:
-1. Check the troubleshooting section
-2. Run the test scripts
-3. Create an issue on GitHub
-
----
-
-**Note**: This tool is designed for legitimate transcription purposes. Please ensure you have the right to transcribe any audio content you process.
+- [whisper.cpp GitHub Repository](https://github.com/ggerganov/whisper.cpp)
+- [OpenAI Whisper Project](https://github.com/openai/whisper)
